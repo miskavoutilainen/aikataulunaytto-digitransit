@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aikataulunäyttö generaattori - Digitransit</title>
+    <link rel="icon" href="../kuvat/tausta.png">
+    <link rel="stylesheet" href="style_index.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+
+    <!-- LEAFLET -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <!-- Leaflet HAKU -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.6.0/dist/geosearch.css" />
+    <script src="https://unpkg.com/leaflet-geosearch@3.6.0/dist/bundle.min.js"></script>
+
+    <!-- rbrush jonka leaflet-markers-canvas vaatii -->
+    <script src="https://cdn.jsdelivr.net/npm/rbush"></script>
+    
+    <!-- TÄTÄ KÄYTETÄÄN, tällä ainakin sai klikkaus eventit toimii: https://github.com/francoisromain/leaflet-markers-canvas -->
+    <script src="https://unpkg.com/leaflet-markers-canvas@latest/dist/leaflet-markers-canvas.js"></script>
+</head>
+<body>
+    <div class="generator">
+        <div class="container">
+            <h1>Aikataulunäyttö</h1>
+            <p>
+                <h2>Kuinka tämä toimii?</h2><br>
+                Tällä työkalulla voit luoda itsellesi oman aikataulunäkymän, joka näyttää valitsemiesi pysäkkien/asemien aikataulut.<br>
+                Klikkaa pysäkkiä kartalta tai kirjoita pysäkin ID manuaalisesti ja paina "+"-nappia. Voit lisätä useita pysäkkejä. Lopuksi paina "Luo aikataulunäkymä"-nappia.
+                <br><h2>Kuinka löydän pysäkin ID:n?</h2><br>
+                Pysäkin ID:n voi löytää esimerkiksi käyttämällä Digitransitin virallisia reittioppaita.
+                Kun olet klikannut pysäkkiä, ID näkyy selaimen osoiterivillä. Esim. jos osoite on "https://reittiopas.hsl.fi/pysakit/HSL%3A1020106",
+                pysäkin ID on "HSL:1020106".
+                <br><h2>Voit valita pysäkit alla olevasta kartasta</h2><br>
+                Klikkaamalla pysäkkiä alla olevalla kartalla, pysäkkin ID lisätään automaattisesti tekstikentään. 
+                Voit lisätä sen sitten aikataulunäyttöösi painamalla "+"-nappia.
+            </p>
+
+            <!-- Hakukenttä kartalle -->
+            <div class="input-container">
+                <label for="search-input">Etsi sijaintia:</label>
+                <input type="text" id="search-input" placeholder="esim. Kuopio tai Torikatu 24 Joensuu">
+                <button class="add-btn" id="search-button">Hae</button>
+            </div>
+
+            <!-- Kartta pysäkeille/asemille -->
+            <div id="map" style="height:300px"></div>
+
+    
+            <div class="settings">
+                <div class="input-container">
+                    <label for="stopId-select">Pysäkin ID:</label>
+                    <input type="text" id="stopId-select" placeholder="Klikkaa kartalta tai syötä manuaalisesti, esim. HSL:1020106">
+                    <button class="add-btn" onclick="addStop()"><span class="material-symbols-outlined">add</span></button>
+
+                </div>
+
+                
+                <div class="settings-row">
+                    <div class="input-container">
+                        <label for="style-select">Valitse tyyli:</label>
+                        <select id="style-select">
+                            <option value="dark">Tumma</option>
+                            <option value="light">Vaalea</option>
+                        </select>
+                    </div>
+                    <div class="input-container">
+                        <label for="hours-select">Tunnit:</label>
+                        <input type="number" id="hours-select" value="2" min="0.1" max="24" step="0.1">
+                    </div>
+                    <div class="input-container">
+                        <label for="clock-select">Näytä kello:</label>
+                        <input type="checkbox" id="clock-select">
+                    </div>
+                </div>
+            </div>
+    
+            <div id="selected-stops-container">
+                <h2>Valitut pysäkit</h2>
+                <ul id="selected-stops"></ul>
+            </div>
+    
+            <button id="generate-url" onclick="generateUrl()"><span class="material-symbols-outlined">check_circle</span> Luo aikataulunäyttö</button>
+            <p id="result-url"></p>
+        </div>
+        <div id="preview">
+            <!-- TÄHÄN TULEE ESIKATSELU AIKATAULUNÄYTÖSTÄ -->
+        </div>
+    </div>
+
+    <script>
+        let stops = [];
+
+        function addStop() {
+            const input = document.getElementById("stopId-select");
+            const stopId = input.value.trim();
+            if (stopId && !stops.includes(stopId)) {
+                stops.push(stopId);
+                updateStopList();
+            }
+            input.value = "";
+        }
+
+        function updateStopList() {
+            const list = document.getElementById("selected-stops");
+            list.innerHTML = "";
+            stops.forEach(stop => {
+                const li = document.createElement("li");
+                li.innerHTML = `
+                    <span>${stop}</span>
+                    <button class="remove-btn" onclick="removeStop('${stop}')">×</button>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        function removeStop(stopId) {
+            stops = stops.filter(s => s !== stopId);
+            updateStopList();
+        }
+
+        function generateUrl() {
+            if (stops.length === 0) {
+                alert("Valitse ja lisää vähintään yksi pysäkki!");
+                return;
+            }
+
+            let style = document.getElementById("style-select").value || "dark";
+            let hours = document.getElementById("hours-select").value || 2;
+            var showClock = document.getElementById("clock-select").checked; // Tämä palauttaa stringin
+
+            const url = `${window.location.origin}/aikataulunaytto/aikataulu.html?stops=${stops.join(",")}&style=${style}&hours=${hours}&clock=${showClock}`;
+            document.getElementById("result-url").innerHTML = `<a href="${url}" target="_blank">${url}</a>`;
+
+            document.getElementById("preview").innerHTML = `
+            <h2>Esikatselu</h2><br>
+            <button id="generate-url" onclick="window.open('${url}','_blank');"><span class="material-symbols-outlined">open_in_new</span> Avaa uuteen välilehteen</button><br><br>
+            <iframe src="${url}" title="Esikatselu aikataulunäytöstä"></iframe>`;
+        }
+    </script>
+    
+    <script src="./pysakkikartta.js"></script>
+</body>
+</html>

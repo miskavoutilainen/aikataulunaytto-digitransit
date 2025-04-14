@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aikataulunäyttö - Digitransit</title>
+    <link rel="icon" href="../kuvat/tausta.png">
+    <link rel="stylesheet" href="style_aikataulu.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300&display=swap" rel="stylesheet">
+</head>
+<body>
+    <h1 id="clock" style="display: none; margin-bottom: 0; font-size: xxx-large; width: 8ch; font-variant-numeric: tabular-nums; font-weight: 100;"></h1>
+    <div class="container">
+        <div id="stops"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const stopsParam = urlParams.get("stops");
+        const styleParam = urlParams.get("style");
+        const hoursParam = urlParams.get("hours");
+        const clockParam = urlParams.get("clock");
+
+        // kellon toiminta
+        function Kello() {
+            let now = new Date();
+
+            const time = now.toLocaleTimeString("fi-FI", { hour: "2-digit", minute: "2-digit" , second: "2-digit"}).replace(/\./g, ":");
+
+            document.getElementById("clock").innerHTML = time;
+        }
+        // muotoillaan aika
+        function formatTime(seconds) {
+            const now = new Date();
+            const time = new Date((now.setHours(0, 0, 0, 0) / 1000 + seconds) * 1000);
+            return time.toLocaleTimeString("fi-FI", { hour: "2-digit", minute: "2-digit" });
+        }
+
+        // otetaan käyttöön parametrinä annettu tyyli
+        function applyStyle() {
+
+            if (styleParam === "light") {
+                document.body.classList.add("light");
+            }
+        }
+
+
+        // haetaan aikataulut pysäkeille/asemmille ja lisätään ne sivulle
+        async function fetchBusTimes() {
+
+            if (!stopsParam) {
+                document.getElementById("stops").innerHTML = "<p>Ei valittuja pysäkkejä.</p>";
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/custom-stops?stops=${stopsParam}&style=${styleParam}&hours=${hoursParam}&clock=${clockParam}`);
+                const stops = await response.json();
+                const container = document.getElementById("stops");
+                container.innerHTML = "";
+
+                if (clockParam === "true") {
+                    document.getElementById("clock").style.display = "inline-block";
+                }
+
+                stops.forEach(stop => {
+                    const stopDiv = document.createElement("div");
+                    stopDiv.className = "stop";
+                    stopDiv.innerHTML = `<h2>${stop.name}</h2>`;
+
+                    const table = document.createElement("table");
+                    table.className = "bus-table";
+                    table.innerHTML = `
+                        <thead>
+                            <tr>
+                                <th>Linja</th>
+                                <th>Reitti</th>
+                                <th>Pysäkillä</th>
+                                <th>Saapumiseen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    `;
+
+                    const tbody = table.querySelector("tbody");
+                    stop.stoptimesWithoutPatterns.sort((a, b) => a.realtimeDeparture - b.realtimeDeparture);
+                    stop.stoptimesWithoutPatterns.forEach(time => {
+                        const route = time.trip?.route;
+                        const headsign = time.headsign || route?.longName || `Reitti ${route?.shortName || "?"}`;
+                        const departureTime = formatTime(time.realtimeDeparture);
+                        
+                        // lasketaan ero aikataulun ja todellisen saapumisajan välillä
+                        const differenceMinutes = Math.round((time.realtimeDeparture - time.scheduledDeparture) / 60);
+                        let delayText = "";
+                        let statusClass = "on-time";
+
+                        if (differenceMinutes > 0) {
+                            delayText = ` (myöhässä ${differenceMinutes} min)`;
+                            statusClass = "late";
+                        } else if (differenceMinutes < 0) {
+                            delayText = ` (ajoissa ${Math.abs(differenceMinutes)} min)`;
+                            statusClass = "early";
+                        }
+
+                        // Lasketaan kuinka monta minuuttia bussin saapumiseen pysäkille on aikaa
+                        const now = new Date();
+                        const nowSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+                        const minutesUntilArrival = Math.max(0, Math.round((time.realtimeDeparture - nowSeconds) / 60));
+
+                        const row = document.createElement("tr");
+                        row.innerHTML = `
+                            <td>${route?.shortName || "?"}</td>
+                            <td>${headsign}</td>
+                            <td>
+                                <div>${departureTime}</div>
+                                <div class="${statusClass}"><div class="delay-text">${delayText}</div></div>
+                            </td>
+
+                            <td>${minutesUntilArrival} min</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+
+                    stopDiv.appendChild(table);
+                    container.appendChild(stopDiv);
+                });
+            } catch (error) {
+                console.error("Virhe haettaessa bussiaikatauluja:", error);
+            }
+        }
+
+        applyStyle();
+
+        Kello();
+        setInterval(Kello, 1000);
+
+        fetchBusTimes();
+        setInterval(fetchBusTimes, 5000);
+    </script>    
+</body>
+</html>
